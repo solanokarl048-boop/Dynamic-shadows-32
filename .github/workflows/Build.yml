@@ -1,0 +1,55 @@
+name: Build ShadowExtender
+
+# Builds libShadowExtender.so on every push/PR, and lets you trigger it
+# manually from the Actions tab. The compiled .so is uploaded as a
+# downloadable build artifact (see the run's "Artifacts" section).
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out ShadowExtender
+        uses: actions/checkout@v4
+
+      # plugin-sdk is a separate repo this plugin builds against.
+      # If you've forked/vendored your own copy, change the repo URL below.
+      - name: Check out plugin-sdk
+        uses: actions/checkout@v4
+        with:
+          repository: DK22Pac/plugin-sdk
+          path: plugin-sdk
+
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r26d
+          add-to-path: true
+
+      - name: Configure (CMake)
+        run: |
+          mkdir build
+          cd build
+          cmake .. \
+            -DPLUGIN_SDK_DIR=${{ github.workspace }}/plugin-sdk \
+            -DCMAKE_TOOLCHAIN_FILE=${{ steps.setup-ndk.outputs.ndk-path }}/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=armeabi-v7a \
+            -DANDROID_PLATFORM=android-19
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Upload compiled .so
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShadowExtender-so
+          path: build/**/libShadowExtender.so
+          if-no-files-found: error
+          
