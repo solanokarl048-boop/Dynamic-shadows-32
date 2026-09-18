@@ -11,16 +11,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repo (with aml-psdk submodule)
+      - name: Check out this repo
+        uses: actions/checkout@v4
+
+      # Fetched explicitly rather than relying on .gitmodules being wired
+      # up correctly on the submitting side -- guarantees aml-psdk/ is
+      # actually populated regardless of local git setup.
+      - name: Check out aml-psdk into ./aml-psdk
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          repository: AndroidModLoader/aml-psdk
+          path: aml-psdk
 
-      # NOTE: this repo's own submodule only covers aml-psdk/. The ./mod/
-      # folder (AML loader headers: amlmod.h, iaml.h, interface.h) must
-      # also be present -- either committed directly to this repo, or
-      # fetched here as its own step/submodule once its source location
-      # is confirmed. Until then this workflow assumes mod/ is committed.
+      - name: Verify required folders are present
+        run: |
+          test -f aml-psdk/game_sa/plugin.h || { echo "::error::aml-psdk/game_sa/plugin.h missing after checkout"; exit 1; }
+          test -f mod/amlmod.h || { echo "::error::mod/amlmod.h missing -- this repo must commit its own mod/ folder (AML loader headers: amlmod.h, iaml.h, interface.h) since it isn't fetched automatically. See README."; exit 1; }
+          test -f mod/iaml.h || { echo "::error::mod/iaml.h missing -- see mod/amlmod.h error above."; exit 1; }
+          echo "All required headers present."
 
       - name: Set up Android NDK
         uses: nttld/setup-ndk@v1
