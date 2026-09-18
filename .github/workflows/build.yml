@@ -9,13 +9,21 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out repo (with aml-psdk submodule)
+      - name: Check out repo
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: recursive  # <-- ADD THIS
           fetch-depth: 0
+
+      - name: Verify aml-psdk
+        run: |
+          ls -la
+          ls -la aml-psdk
+          find aml-psdk -name "plugin.h"
+
+      - name: Build
+        run: ndk-build
 
       - name: Debug files
         run: find . -name "plugin.h"
