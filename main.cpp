@@ -36,7 +36,7 @@
 // instead of a live sun direction. If you find the real light-direction
 // source in the SDK, swap it in where marked below.
 
-#include <aml-psdk/game_sa/plugin.h>
+#include <aml-psdk/sdk_base.h>
 #include <aml-psdk/game_sa/entity/Object.h>
 #include <aml-psdk/game_sa/entity/Entity.h>
 #include <aml-psdk/game_sa/engine/Shadows.h>
