@@ -23,3 +23,6 @@ LOCAL_CPPFLAGS := -std=c++17 -Os -fno-exceptions -fno-rtti -DANDROID
 LOCAL_LDLIBS := -llog
 
 include $(BUILD_SHARED_LIBRARY)
+
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/aml-psdk
+
