@@ -44,3 +44,12 @@ jobs:
           name: ShadowExtender-so
           path: libs/**/*.so
           if-no-files-found: error
+
+      - name: Debug submodule contents
+        run: |
+          echo "--- git submodule status ---"
+          git submodule status
+          echo "--- aml-psdk top level ---"
+          ls -la aml-psdk
+          echo "--- looking for plugin.h ---"
+          find aml-psdk -iname "plugin.h"
