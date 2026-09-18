@@ -1,3 +1,8 @@
 [submodule "aml-psdk"]
 	path = aml-psdk
 	url = https://github.com/AndroidModLoader/aml-psdk.git
+
+cd /path/to/your/project
+git add aml-psdk/ mod/
+git commit -m "Vendor aml-psdk and mod headers"
+git push
