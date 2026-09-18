@@ -24,5 +24,5 @@ LOCAL_LDLIBS := -llog
 
 include $(BUILD_SHARED_LIBRARY)
 
-LOCAL_C_INCLUDES += $(LOCAL_PATH)/aml-psdk
+LOCAL_C_INCLUDES += $(aml-psdk)/aml-psdk
 
