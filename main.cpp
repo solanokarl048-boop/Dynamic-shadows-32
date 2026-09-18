@@ -36,12 +36,19 @@
 // instead of a live sun direction. If you find the real light-direction
 // source in the SDK, swap it in where marked below.
 
-#include <aml-psdk/sdk_base.h>
+#include <mod/amlmod.h>
+
+//aml-psdk headers --------------------------------------------------
+// plugin.h MUST come first: it sets up BASE_GAME_LIBRARY and other config
+// macros that sdk_base.h (pulled in by every other aml-psdk header) refuses
+// to compile without. Including it late causes both a macro-redefinition
+// warning and a hard error from sdk_base.h's own include guard check.
+
+#include <aml-psdk/game_sa/plugin.h>
 #include <aml-psdk/game_sa/entity/Object.h>
 #include <aml-psdk/game_sa/entity/Entity.h>
 #include <aml-psdk/game_sa/engine/Shadows.h>
 #include <aml-psdk/game_sa/base/Timer.h>
-#include <mod/amlmod.h>
 
 #include "mod/IniConfig.h"
 
