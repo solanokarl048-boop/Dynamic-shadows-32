@@ -36,14 +36,14 @@
 // instead of a live sun direction. If you find the real light-direction
 // source in the SDK, swap it in where marked below.
 
-#include <aml-psdk/aml-psdk/game_sa/plugin.h>
-#include <aml-psdk/aml-psdk/game_sa/entity/Object.h>
-#include <aml-psdk/aml-psdk/game_sa/entity/Entity.h>
-#include <aml-psdk/aml-psdk/game_sa/engine/Shadows.h>
-#include <aml-psdk/aml-psdk/game_sa/base/Timer.h>
-#include <AndroidModLoader/mod/amlmod.h>
+#include <aml-psdk/game_sa/plugin.h>
+#include <aml-psdk/game_sa/entity/Object.h>
+#include <aml-psdk/game_sa/entity/Entity.h>
+#include <aml-psdk/game_sa/engine/Shadows.h>
+#include <aml-psdk/game_sa/base/Timer.h>
+#include <mod/amlmod.h>
 
-#include "AndroidModLoader/mod/IniConfig.h"
+#include "mod/IniConfig.h"
 
 MYMOD("net.psdk.samod.shadowextender", "ShadowExtender", "1.0.0", "YourName")
 
