@@ -1,9 +1,5 @@
 name: Build ShadowExtender
 
-# Builds libShadowExtender.so on every push/PR, and lets you trigger it
-# manually from the Actions tab. The compiled .so is uploaded as a
-# downloadable build artifact (see the run's "Artifacts" section).
-
 on:
   push:
     branches: [ main ]
@@ -15,41 +11,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out ShadowExtender
-        uses: actions/checkout@v4
-
-      # plugin-sdk is a separate repo this plugin builds against.
-      # If you've forked/vendored your own copy, change the repo URL below.
-      - name: Check out plugin-sdk
+      - name: Check out repo (with aml-psdk submodule)
         uses: actions/checkout@v4
         with:
-          repository: DK22Pac/plugin-sdk
-          path: plugin-sdk
+          submodules: recursive
+
+      # NOTE: this repo's own submodule only covers aml-psdk/. The ./mod/
+      # folder (AML loader headers: amlmod.h, iaml.h, interface.h) must
+      # also be present -- either committed directly to this repo, or
+      # fetched here as its own step/submodule once its source location
+      # is confirmed. Until then this workflow assumes mod/ is committed.
 
       - name: Set up Android NDK
         uses: nttld/setup-ndk@v1
         id: setup-ndk
         with:
-          ndk-version: r26d
+          ndk-version: r29
           add-to-path: true
 
-      - name: Configure (CMake)
+      - name: Build with ndk-build
         run: |
-          mkdir build
-          cd build
-          cmake .. \
-            -DPLUGIN_SDK_DIR=${{ github.workspace }}/plugin-sdk \
-            -DCMAKE_TOOLCHAIN_FILE=${{ steps.setup-ndk.outputs.ndk-path }}/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=armeabi-v7a \
-            -DANDROID_PLATFORM=android-19
+          $ANDROID_NDK_HOME/ndk-build \
+            NDK_PROJECT_PATH=. \
+            APP_BUILD_SCRIPT=./Android.mk \
+            NDK_APPLICATION_MK=./Application.mk
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      - name: Build
-        run: cmake --build build --config Release
-
-      - name: Upload compiled .so
+      - name: Upload compiled .so files
         uses: actions/upload-artifact@v4
         with:
           name: ShadowExtender-so
-          path: build/**/libShadowExtender.so
+          path: libs/**/*.so
           if-no-files-found: error
-          
