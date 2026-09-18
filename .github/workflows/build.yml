@@ -17,6 +17,9 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Debug files
+        run: find . -name "plugin.h"
+
       - name: Debug submodule contents
         run: ls -R aml-psdk
 
