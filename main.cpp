@@ -45,7 +45,7 @@
 
 #include "mod/IniConfig.h"
 
-MYMOD("net.psdk.samod.shadowextender", "ShadowExtender", "1.0.0", "YourName")
+MYMOD("net.xenon.shadowextender", "ShadowExtender", "1.0.0", "xenon")
 
 // ---------------------------------------------------------------------
 // Configuration (populated from ShadowExtender.ini on load)
