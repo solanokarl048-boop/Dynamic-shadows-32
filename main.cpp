@@ -149,7 +149,7 @@ DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
     float sy = g_cfg.dirSideY  * radius;
 
     CShadows::StoreShadowToBeRendered(
-        SHADOW_DECAL,
+        SHADOW_ADDITIVE,
         &pos,
         fx, fy,
         sx, sy,
