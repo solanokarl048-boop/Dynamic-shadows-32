@@ -243,6 +243,16 @@ DECL_HOOKv(HookedEntityRender, CEntity *pThis)
             (i16)g_cfg.opacity,
             0, 0, 0
         );
+
+        static int blobCallCount = 0;
+        if (blobCallCount < 10) {
+            blobCallCount++;
+            char marker[160];
+            snprintf(marker, sizeof(marker),
+                     "CHECKPOINT_8_our_blob_call_made_model%d_pos%.0f_%.0f_%.0f.txt",
+                     pThis->m_nModelIndex, pos.x, pos.y, pos.z);
+            WriteMarker(marker);
+        }
     }
 }
 
