@@ -42,10 +42,13 @@
 #include <aml-psdk/game_sa/engine/Shadows.h>
 #include <aml-psdk/game_sa/base/Timer.h>
 #include <mod/amlmod.h>
+#include <android/log.h>
 
 #include "mod/IniConfig.h"
 
-MYMOD("net.psdk.samod.shadowextender", "ShadowExtender", "1.0.0", "YourName")
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ShadowExtender", __VA_ARGS__)
+
+MYMOD("net.xenon.shadowextender", "ShadowExtender", "1.0.0", "Xenon")
 
 // ---------------------------------------------------------------------
 // Configuration (populated from ShadowExtender.ini on load)
@@ -105,6 +108,13 @@ DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
     // if the engine ever does something in it, or another mod hooks it).
     HookedStoreShadowForTree(pEntity);
 
+    static int callCount = 0;
+    if (callCount < 20) { // cap so logcat doesn't get flooded every frame
+        callCount++;
+        LOGI("StoreShadowForTree HOOK FIRED (call #%d), entity=%p, model=%d",
+             callCount, (void*)pEntity, pEntity ? pEntity->m_nModelIndex : -1);
+    }
+
     if (!g_cfg.enabled || !g_cfg.shadowTrees || !pEntity)
         return;
 
@@ -134,6 +144,22 @@ DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
 // ---------------------------------------------------------------------
 ON_MOD_LOAD()
 {
+    LOGI("ShadowExtender OnModLoad() reached");
+
     LoadConfig();
-    HOOK(HookedStoreShadowForTree, (uintptr_t)CShadows::StoreShadowForTree);
+    LOGI("Config loaded: enabled=%d shadowTrees=%d opacity=%.1f",
+         g_cfg.enabled, g_cfg.shadowTrees, g_cfg.opacity);
+
+    uintptr_t targetAddr = (uintptr_t)CShadows::StoreShadowForTree;
+    LOGI("CShadows::StoreShadowForTree resolved address: 0x%lx", (unsigned long)targetAddr);
+
+    if (targetAddr == 0) {
+        LOGI("ERROR: StoreShadowForTree symbol did not resolve (address is 0) -- "
+             "hook will not be installed. This means the symbol name/mangling "
+             "doesn't match this game build.");
+        return;
+    }
+
+    HOOK(HookedStoreShadowForTree, targetAddr);
+    LOGI("Hook installed on StoreShadowForTree");
 }
