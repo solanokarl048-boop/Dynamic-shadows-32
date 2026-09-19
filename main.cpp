@@ -181,18 +181,20 @@ DECL_HOOKb(HookedStoreRealTimeShadow, CPhysical *pPhysical, float ShadowDisplace
 }
 
 // ---------------------------------------------------------------------
-// The hook: CEntity::Render(). Confirmed firing on-device (CHECKPOINT_4).
+// Shared shadow-storing logic, called from ProcessControl() (see below)
+// rather than Render(). Reasoning: in essentially every game engine's
+// architecture, including GTA's, the update/logic phase (ProcessControl)
+// runs for all entities BEFORE the render phase (Render) each frame. If
+// RenderStoredShadows is called once per frame as part of that same
+// render phase, storing from inside Render() means our entry always
+// arrives one step too late for that frame's render call -- and if the
+// array gets cleared/consumed between frames, it would never actually
+// get drawn, despite every individual piece (store succeeds, render pass
+// fires) working correctly in isolation. This matches everything observed
+// so far. Storing from ProcessControl() instead should land before the
+// same frame's RenderStoredShadows call.
 // ---------------------------------------------------------------------
-DECL_HOOKv(HookedEntityRender, CEntity *pThis)
-{
-    HookedEntityRender(pThis); // MUST call original -- this is what actually draws the model
-
-    static int renderCallCount = 0;
-    if (renderCallCount < 5) {
-        renderCallCount++;
-        WriteMarker("CHECKPOINT_4_render_hook_fired.txt");
-    }
-
+static void StoreObjectShadow(CEntity *pThis) {
     if (!g_cfg.enabled || !g_cfg.shadowObjects || !pThis)
         return;
 
@@ -211,10 +213,9 @@ DECL_HOOKv(HookedEntityRender, CEntity *pThis)
     float sy = g_cfg.dirSideY  * radius;
 
     if (g_cfg.useRealTimeShadow) {
-        // Real dynamic shadow system -- same mechanism the game itself
-        // uses for peds/vehicles, not a texture blob. CObject IS-A
-        // CPhysical, so this cast is safe given IsObject() already
-        // returned true above.
+        // Real dynamic shadow system -- confirmed via CHECKPOINT_7 testing
+        // to reject static objects in practice. Kept as an option in case
+        // that gets revisited, but off by default.
         CPhysical *pPhysical = static_cast<CPhysical*>(pThis);
         bool ok = CShadows::StoreRealTimeShadow(pPhysical, 0.0f, 0.0f, fx, fy, sx, sy);
 
@@ -225,15 +226,6 @@ DECL_HOOKv(HookedEntityRender, CEntity *pThis)
                            : "CHECKPOINT_5_realtimeshadow_returned_false.txt");
         }
     } else {
-        // Fallback: flat untextured polygon blob. SHADOW_DEFAULT rather
-        // than SHADOW_ADDITIVE -- RenderStoredShadows(bool renderAdditive)
-        // renders additive- and non-additive-type stored shadows in two
-        // separate passes; if the engine's main loop only calls the
-        // non-additive pass by default (plausible, given CJ's own shadow
-        // always renders reliably), anything stored as SHADOW_ADDITIVE
-        // would never actually get drawn regardless of everything else
-        // being correct. SHADOW_DEFAULT should go through the same pass
-        // that's already confirmed active.
         CVector pos = pThis->GetPosition();
         CShadows::StoreShadowToBeRendered(
             SHADOW_DEFAULT,
@@ -249,11 +241,47 @@ DECL_HOOKv(HookedEntityRender, CEntity *pThis)
             blobCallCount++;
             char marker[160];
             snprintf(marker, sizeof(marker),
-                     "CHECKPOINT_8_our_blob_call_made_model%d_pos%.0f_%.0f_%.0f.txt",
+                     "CHECKPOINT_9_processcontrol_blob_call_model%d_pos%.0f_%.0f_%.0f.txt",
                      pThis->m_nModelIndex, pos.x, pos.y, pos.z);
             WriteMarker(marker);
         }
     }
+}
+
+// ---------------------------------------------------------------------
+// CEntity::Render() -- kept only as a lightweight diagnostic now that the
+// actual shadow-storing moved to ProcessControl(). Confirmed firing
+// on-device (CHECKPOINT_4).
+// ---------------------------------------------------------------------
+DECL_HOOKv(HookedEntityRender, CEntity *pThis)
+{
+    HookedEntityRender(pThis); // MUST call original -- this is what actually draws the model
+
+    static int renderCallCount = 0;
+    if (renderCallCount < 5) {
+        renderCallCount++;
+        WriteMarker("CHECKPOINT_4_render_hook_fired.txt");
+    }
+}
+
+// ---------------------------------------------------------------------
+// CEntity::ProcessControl() -- the update/logic-phase hook, tried as a
+// fix for suspected frame-ordering: storing here (before rendering,
+// architecturally) rather than from Render() (confirmed too late,
+// architecturally, if RenderStoredShadows runs as part of the render
+// phase). Virtual, so resolved manually via dlsym like Render() was.
+// ---------------------------------------------------------------------
+DECL_HOOKv(HookedEntityProcessControl, CEntity *pThis)
+{
+    HookedEntityProcessControl(pThis); // MUST call original
+
+    static int pcCallCount = 0;
+    if (pcCallCount < 5) {
+        pcCallCount++;
+        WriteMarker("CHECKPOINT_9_processcontrol_hook_fired.txt");
+    }
+
+    StoreObjectShadow(pThis);
 }
 
 // ---------------------------------------------------------------------
@@ -287,6 +315,20 @@ ON_MOD_LOAD()
     HOOK(HookedEntityRender, renderAddr);
     LOGI("Hook installed on CEntity::Render");
     WriteMarker("CHECKPOINT_2_hook_installed.txt");
+
+    // ProcessControl hook -- the actual shadow-storing now happens here
+    // instead of Render(), testing the frame-ordering theory.
+    uintptr_t processControlAddr = (uintptr_t)dlsym(gameLib, "_ZN7CEntity14ProcessControlEv");
+    LOGI("CEntity::ProcessControl resolved address: 0x%lx", (unsigned long)processControlAddr);
+
+    if (processControlAddr == 0) {
+        LOGI("ERROR: CEntity::ProcessControl symbol did not resolve");
+        WriteMarker("CHECKPOINT_ERROR_processcontrol_symbol_not_resolved.txt");
+    } else {
+        HOOK(HookedEntityProcessControl, processControlAddr);
+        LOGI("Hook installed on CEntity::ProcessControl");
+        WriteMarker("CHECKPOINT_9_processcontrol_hook_installed.txt");
+    }
 
     // Second diagnostic hook: RenderStoredShadows. Directly addressable
     // via the SDK macro, no dlsym needed.
