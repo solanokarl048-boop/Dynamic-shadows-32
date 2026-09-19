@@ -17,7 +17,15 @@ LOCAL_MODULE := AML_PSDK_ShadowExtender
 
 LOCAL_SRC_FILES := main.cpp
 
-LOCAL_C_INCLUDES := $(LOCAL_PATH)
+LOCAL_C_INCLUDES := \
+    $(LOCAL_PATH) \
+    $(LOCAL_PATH)/aml-psdk
+
+# NOTE: the aml-psdk submodule is a full template project, not just
+# headers -- its actual SDK content lives one folder deeper than you'd
+# expect, at aml-psdk/aml-psdk/game_sa/... . Adding $(LOCAL_PATH)/aml-psdk
+# as its own include root lets #include <aml-psdk/game_sa/...> in main.cpp
+# resolve correctly without changing any #include lines.
 
 LOCAL_CPPFLAGS := -std=c++17 -Os -fno-exceptions -fno-rtti -DANDROID
 LOCAL_LDLIBS := -llog
