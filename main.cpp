@@ -1,40 +1,38 @@
 // main.cpp — ShadowExtender
 //
 // GTA San Andreas Android plugin for AndroidModLoader (AML) / aml-psdk.
+// Built against headers pulled from the real SDK (plugin.h,
+// entity/Object.h, entity/Entity.h, entity/Placeable.h, engine/Shadows.h,
+// base/Timer.h, mod/amlmod.h, mod/iaml.h).
 //
-// This version is built against headers actually pulled from the real
-// SDK (plugin.h, engine/Shadows.h, entity/Object.h, entity/Entity.h,
-// entity/Placeable.h, base/Timer.h, mod/amlmod.h, mod/iaml.h) rather
-// than guessed. Everything below compiles against confirmed real
-// symbols, with one deliberate scope decision explained below.
+// HOW THIS WORKS (confirmed via on-device checkpoint testing, not just
+// theory -- see the checkpoint markers below)
+// ---------------------------------------------------------------------
+// First approach tried: hooking CShadows::StoreShadowForTree(CEntity*),
+// which exists in the game as a NOP. Confirmed via CHECKPOINT_3 never
+// appearing that this function is genuinely never called by the engine
+// in this build -- not just an unused NOP, actually dead code.
 //
-// HOW THIS WORKS
-// ---------------
-// The shipped game already has CShadows::StoreShadowForTree(CEntity*),
-// but it's a NOP -- the engine identifies trees and calls this function
-// per-tree (almost certainly during its render/pre-render pass, since
-// CEntity also has a dedicated ModifyMatrixForTreeInWind for the same
-// category of object), it just never does anything with the call. That
-// makes it a clean hook point: rather than scanning the world for
-// candidate objects every frame (which would need CPools/CWorld headers
-// this project doesn't have yet), we hook the one function the engine
-// already calls once per tree and give it a real shadow.
+// Working approach: hooking CEntity::Render() itself. Every entity type
+// calls this when drawn unless it overrides it with its own version;
+// CObject (trees, vegetation, small static props, decorations) doesn't
+// appear to override it, so this fires for every visible object each
+// frame it's rendered -- confirmed via CHECKPOINT_4 actually appearing
+// on-device. Render() is virtual, so its address isn't exposed via the
+// DECL_* header macros; it's resolved manually via dlsym using the same
+// Itanium mangling pattern every other CEntity method follows.
 //
-// SCOPE NOTE: this covers trees/vegetation, which the engine already
-// routes through StoreShadowForTree. Generic small objects and buildings
-// don't have an equivalent NOP hook in what's been inspected so far --
-// extending to those would need the world/pool iteration API (CPools /
-// CWorld), which hasn't been confirmed against real headers yet. Treat
-// that as a follow-up, not something guessed at here.
+// SCOPE: this covers CObject entities broadly (trees + small static
+// props + decorations), not specifically "trees" as a distinct category
+// -- there's no confirmed CModelInfo/model-name header available yet to
+// filter by name. Buildings and peds/vehicles are excluded via
+// IsObject().
 //
-// REMAINING KNOWN GAP: shadow direction. The real "advanced shadow
-// system" primitive for this is CShadows::CalcPedShadowValues(CVector
-// UnitVecToLight, ...), which derives correct front/side spread from a
-// unit vector toward the light source -- but no CTimeCycle/CWeather
-// equivalent has been found yet to supply that vector. Until that's
-// located, this uses a configurable fixed direction from the INI
-// instead of a live sun direction. If you find the real light-direction
-// source in the SDK, swap it in where marked below.
+// KNOWN GAP: shadow direction is a fixed value from the INI, not tied to
+// live sun position. The real primitive for that,
+// CShadows::CalcPedShadowValues(CVector UnitVecToLight, ...), is known,
+// but no CTimeCycle/CWeather-equivalent header has been found yet to
+// supply the light vector.
 
 #include <aml-psdk/game_sa/plugin.h>
 #include <aml-psdk/game_sa/entity/Object.h>
@@ -49,9 +47,9 @@
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ShadowExtender", __VA_ARGS__)
 
-// Non-destructive, no-log-access-needed diagnostic: write a marker file at
-// each checkpoint. Check for these with any file manager app afterward --
-// whichever ones exist tells us exactly how far execution got.
+// Non-destructive on-device diagnostic: write a marker file at each
+// checkpoint, checkable with any file manager app. Left in place (cheap,
+// capped) in case future changes need the same kind of verification.
 static const char *kMarkerDir = "/sdcard/Android_unprotected/data/com.rockstargames.gtasa/configs/";
 
 static void WriteMarker(const char *name) {
@@ -70,15 +68,15 @@ MYMOD("net.psdk.samod.shadowextender", "ShadowExtender", "1.0.0", "YourName")
 // Configuration (populated from ShadowExtender.ini on load)
 // ---------------------------------------------------------------------
 struct Config {
-    bool  enabled        = true;
-    bool  shadowTrees     = true;
-    float opacity          = 180.0f; // maps to CShadows Brightness (i16)
-    float sizeScale         = 1.0f;  // multiplies the base shadow radius
-    float baseRadius        = 3.0f;  // world units, before sizeScale
-    float dirFrontX          = 0.7f; // fixed shadow-spread direction,
-    float dirFrontY          = 0.7f; // pending a real light-direction
-    float dirSideX           = -0.7f;// source (see file header note)
-    float dirSideY           = 0.7f;
+    bool  enabled     = true;
+    bool  shadowObjects = true; // was "shadowTrees" -- see SCOPE note above
+    float opacity       = 180.0f; // maps to CShadows Brightness (i16)
+    float sizeScale      = 1.0f;  // multiplies the base shadow radius
+    float baseRadius     = 3.0f;  // world units, before sizeScale
+    float dirFrontX       = 0.7f; // fixed shadow-spread direction,
+    float dirFrontY       = 0.7f; // pending a real light-direction
+    float dirSideX        = -0.7f;// source (see KNOWN GAP above)
+    float dirSideY        = 0.7f;
     std::vector<int> modelBlacklist;
 };
 
@@ -91,8 +89,8 @@ static void LoadConfig() {
     if (!ini.Load(kIniPath))
         return; // keep defaults if no INI present yet
 
-    g_cfg.enabled      = ini.GetBool("General", "Enabled", g_cfg.enabled);
-    g_cfg.shadowTrees   = ini.GetBool("Targets", "ShadowTrees", g_cfg.shadowTrees);
+    g_cfg.enabled       = ini.GetBool("General", "Enabled", g_cfg.enabled);
+    g_cfg.shadowObjects  = ini.GetBool("Targets", "ShadowObjects", g_cfg.shadowObjects);
 
     g_cfg.opacity        = ini.GetFloat("Render", "Opacity", g_cfg.opacity);
     g_cfg.sizeScale       = ini.GetFloat("Render", "SizeScale", g_cfg.sizeScale);
@@ -114,33 +112,30 @@ static bool ModelBlacklisted(int modelId) {
 }
 
 // ---------------------------------------------------------------------
-// The hook: CShadows::StoreShadowForTree is a NOP in the shipped game.
-// We replace it with a real implementation. DECL_HOOKv declares both the
-// trampoline (pointer to the original, still callable) and this handler.
+// The hook: CEntity::Render(). Confirmed firing on-device (CHECKPOINT_4).
 // ---------------------------------------------------------------------
-DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
+DECL_HOOKv(HookedEntityRender, CEntity *pThis)
 {
-    // Call the original first (a NOP today, but harmless and future-proof
-    // if the engine ever does something in it, or another mod hooks it).
-    HookedStoreShadowForTree(pEntity);
+    HookedEntityRender(pThis); // MUST call original -- this is what actually draws the model
 
-    static int callCount = 0;
-    if (callCount < 20) { // cap so logcat doesn't get flooded every frame
-        callCount++;
-        LOGI("StoreShadowForTree HOOK FIRED (call #%d), entity=%p, model=%d",
-             callCount, (void*)pEntity, pEntity ? pEntity->m_nModelIndex : -1);
-    }
-    if (callCount == 1) {
-        WriteMarker("CHECKPOINT_3_hook_fired.txt");
+    static int renderCallCount = 0;
+    if (renderCallCount < 5) {
+        renderCallCount++;
+        WriteMarker("CHECKPOINT_4_render_hook_fired.txt");
     }
 
-    if (!g_cfg.enabled || !g_cfg.shadowTrees || !pEntity)
+    if (!g_cfg.enabled || !g_cfg.shadowObjects || !pThis)
         return;
 
-    if (ModelBlacklisted(pEntity->m_nModelIndex))
+    // See SCOPE note at top of file -- this is CObject broadly, not
+    // specifically "trees".
+    if (!pThis->IsObject())
         return;
 
-    CVector pos = pEntity->GetPosition();
+    if (ModelBlacklisted(pThis->m_nModelIndex))
+        return;
+
+    CVector pos = pThis->GetPosition();
     float radius = g_cfg.baseRadius * g_cfg.sizeScale;
 
     float fx = g_cfg.dirFrontX * radius;
@@ -159,42 +154,6 @@ DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
 }
 
 // ---------------------------------------------------------------------
-// PIVOT: StoreShadowForTree is confirmed (CHECKPOINT_3 never appeared) to
-// NOT be called by the engine in this build -- genuinely dead code, not
-// just an unused-but-invoked NOP. Leaving the hook above installed
-// (harmless, costs nothing since it never fires) and adding a second,
-// different hook point: CEntity::Render() itself, which every entity
-// type calls when drawn unless it overrides Render() with its own
-// version. CObject (what trees are) doesn't appear to override it -- so
-// this should fire for every visible tree (and every other
-// non-overriding entity type), which we then filter down ourselves.
-//
-// Render() is virtual, so it isn't exposed via the DECL_* header macros
-// we have -- resolving its address manually via dlsym, using the same
-// Itanium mangling pattern every other CEntity method in Entity.h follows
-// (_ZN7CEntity + length+name + Ev for a no-arg method): "Render" is 6
-// chars, so _ZN7CEntity6RenderEv. This is a reconstructed guess, not
-// pulled from a header -- validate via CHECKPOINT_4 before building real
-// shadow logic on top of it, same lesson as last time.
-// ---------------------------------------------------------------------
-DECL_HOOKv(HookedEntityRender, CEntity *pThis)
-{
-    HookedEntityRender(pThis); // MUST call original -- this is what actually draws the model
-
-    static int renderCallCount = 0;
-    if (renderCallCount < 5) {
-        renderCallCount++;
-        WriteMarker("CHECKPOINT_4_render_hook_fired.txt");
-        LOGI("CEntity::Render HOOK FIRED (call #%d), entity=%p, model=%d, type=%d",
-             renderCallCount, (void*)pThis, pThis ? pThis->m_nModelIndex : -1,
-             pThis ? pThis->m_nType : -1);
-    }
-
-    // Real shadow logic intentionally NOT added yet -- confirm the hook
-    // fires at all first (check for CHECKPOINT_4).
-}
-
-// ---------------------------------------------------------------------
 // Mod lifecycle
 // ---------------------------------------------------------------------
 ON_MOD_LOAD()
@@ -203,25 +162,12 @@ ON_MOD_LOAD()
     WriteMarker("CHECKPOINT_1_modload_reached.txt");
 
     LoadConfig();
-    LOGI("Config loaded: enabled=%d shadowTrees=%d opacity=%.1f",
-         g_cfg.enabled, g_cfg.shadowTrees, g_cfg.opacity);
+    LOGI("Config loaded: enabled=%d shadowObjects=%d opacity=%.1f",
+         g_cfg.enabled, g_cfg.shadowObjects, g_cfg.opacity);
 
-    uintptr_t targetAddr = (uintptr_t)CShadows::StoreShadowForTree;
-    LOGI("CShadows::StoreShadowForTree resolved address: 0x%lx", (unsigned long)targetAddr);
-
-    if (targetAddr != 0) {
-        HOOK(HookedStoreShadowForTree, targetAddr);
-        LOGI("Hook installed on StoreShadowForTree");
-        WriteMarker("CHECKPOINT_2_hook_installed.txt");
-    } else {
-        LOGI("ERROR: StoreShadowForTree symbol did not resolve (address is 0)");
-        WriteMarker("CHECKPOINT_ERROR_symbol_not_resolved.txt");
-    }
-
-    // Second, independent hook attempt: CEntity::Render, resolved manually.
     void *gameLib = dlopen("libGTASA.so", RTLD_NOLOAD);
     if (!gameLib) {
-        LOGI("ERROR: dlopen(libGTASA.so, RTLD_NOLOAD) failed -- game library not found under this name");
+        LOGI("ERROR: dlopen(libGTASA.so, RTLD_NOLOAD) failed");
         WriteMarker("CHECKPOINT_ERROR_gamelib_not_found.txt");
         return;
     }
@@ -230,12 +176,12 @@ ON_MOD_LOAD()
     LOGI("CEntity::Render resolved address: 0x%lx", (unsigned long)renderAddr);
 
     if (renderAddr == 0) {
-        LOGI("ERROR: CEntity::Render symbol did not resolve -- mangled name guess was wrong");
+        LOGI("ERROR: CEntity::Render symbol did not resolve");
         WriteMarker("CHECKPOINT_ERROR_render_symbol_not_resolved.txt");
         return;
     }
 
     HOOK(HookedEntityRender, renderAddr);
     LOGI("Hook installed on CEntity::Render");
-    WriteMarker("CHECKPOINT_4_render_hook_installed.txt");
+    WriteMarker("CHECKPOINT_2_hook_installed.txt");
 }
