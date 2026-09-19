@@ -60,7 +60,7 @@
 // Non-destructive on-device diagnostic: write a marker file at each
 // checkpoint, checkable with any file manager app. Left in place (cheap,
 // capped) in case future changes need the same kind of verification.
-static const char *kMarkerDir = "/sdcard/Android/data/com.rockstargames.gtasa/files/";
+static const char *kMarkerDir = "/sdcard/Android_unprotected/data/com.rockstargames.gtasa/files/configs";
 
 static void WriteMarker(const char *name) {
     char path[256];
@@ -93,7 +93,7 @@ struct Config {
 
 static Config g_cfg;
 
-static const char *kIniPath = "/sdcard/Androidg_unprotected/data/com.rockstargames.gtasa/configs";
+static const char *kIniPath = "/sdcard/Android/data/com.rockstargames.gtasa/files/ShadowExtender.ini";
 
 static void LoadConfig() {
     IniConfig ini;
@@ -121,6 +121,32 @@ static void LoadConfig() {
 static bool ModelBlacklisted(int modelId) {
     return std::find(g_cfg.modelBlacklist.begin(), g_cfg.modelBlacklist.end(), modelId)
            != g_cfg.modelBlacklist.end();
+}
+
+// ---------------------------------------------------------------------
+// Diagnostic hook: does the engine ever call RenderStoredShadows at all?
+// If StoreShadowToBeRendered's blob array is stored correctly but never
+// read/drawn, this is the function that would prove it -- and since it
+// takes a renderAdditive bool, it also settles whether the additive pass,
+// the non-additive pass, or neither actually runs. Exposed via the
+// normal DECL_FASTCALL_SIMPLE macro (not virtual like Render() was), so
+// no manual dlsym needed -- CShadows::RenderStoredShadows is directly
+// addressable.
+// ---------------------------------------------------------------------
+DECL_HOOKv(HookedRenderStoredShadows, bool renderAdditive)
+{
+    static int additiveCalls = 0;
+    static int nonAdditiveCalls = 0;
+
+    if (renderAdditive && additiveCalls < 5) {
+        additiveCalls++;
+        WriteMarker("CHECKPOINT_6_renderstoredshadows_additive_fired.txt");
+    } else if (!renderAdditive && nonAdditiveCalls < 5) {
+        nonAdditiveCalls++;
+        WriteMarker("CHECKPOINT_6_renderstoredshadows_nonadditive_fired.txt");
+    }
+
+    HookedRenderStoredShadows(renderAdditive); // call original -- must still render normally
 }
 
 // ---------------------------------------------------------------------
@@ -220,4 +246,18 @@ ON_MOD_LOAD()
     HOOK(HookedEntityRender, renderAddr);
     LOGI("Hook installed on CEntity::Render");
     WriteMarker("CHECKPOINT_2_hook_installed.txt");
+
+    // Second diagnostic hook: RenderStoredShadows. Directly addressable
+    // via the SDK macro, no dlsym needed.
+    uintptr_t renderStoredAddr = (uintptr_t)CShadows::RenderStoredShadows;
+    LOGI("CShadows::RenderStoredShadows resolved address: 0x%lx", (unsigned long)renderStoredAddr);
+
+    if (renderStoredAddr == 0) {
+        LOGI("ERROR: RenderStoredShadows symbol did not resolve");
+        WriteMarker("CHECKPOINT_ERROR_renderstoredshadows_not_resolved.txt");
+    } else {
+        HOOK(HookedRenderStoredShadows, renderStoredAddr);
+        LOGI("Hook installed on RenderStoredShadows");
+        WriteMarker("CHECKPOINT_6_renderstoredshadows_hook_installed.txt");
+    }
 }
