@@ -13,7 +13,7 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v4
         with:
-          submodules: recursive  # <-- ADD THIS
+          submodules: recursive
           fetch-depth: 0
 
       - name: Show gitmodules
@@ -25,20 +25,17 @@ jobs:
           ls -la aml-psdk
           find aml-psdk -name "plugin.h"
 
-      - name: Build
-        run: ndk-build
-
-      - name: Debug files
-        run: find . -name "plugin.h"
-
-      - name: Debug submodule contents
-        run: ls -R aml-psdk
-
       # NOTE: this repo's own submodule only covers aml-psdk/. The ./mod/
       # folder (AML loader headers: amlmod.h, iaml.h, interface.h) must
       # also be present -- either committed directly to this repo, or
       # fetched here as its own step/submodule once its source location
       # is confirmed. Until then this workflow assumes mod/ is committed.
+
+      - name: Verify mod/ folder
+        run: |
+          ls -la mod
+          test -f mod/amlmod.h || { echo "::error::mod/amlmod.h missing -- did you commit and push the mod/ folder?"; exit 1; }
+          test -f mod/iaml.h || { echo "::error::mod/iaml.h missing -- did you commit and push the mod/ folder?"; exit 1; }
 
       - name: Set up Android NDK
         uses: nttld/setup-ndk@v1
@@ -56,14 +53,8 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      - name: Upload compiled .so files
-        uses: actions/upload-artifact@v4
-        with:
-          name: ShadowExtender-so
-          path: libs/**/*.so
-          if-no-files-found: error
-
-      - name: Debug submodule contents
+      - name: Debug submodule contents (only runs if build above failed)
+        if: failure()
         run: |
           echo "--- git submodule status ---"
           git submodule status
@@ -71,3 +62,11 @@ jobs:
           ls -la aml-psdk
           echo "--- looking for plugin.h ---"
           find aml-psdk -iname "plugin.h"
+
+      - name: Upload compiled .so files
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShadowExtender-so
+          path: libs/**/*.so
+          if-no-files-found: error
+          
