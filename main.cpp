@@ -43,6 +43,7 @@
 #include <aml-psdk/game_sa/base/Timer.h>
 #include <mod/amlmod.h>
 #include <android/log.h>
+#include <dlfcn.h>
 
 #include "mod/IniConfig.h"
 
@@ -140,7 +141,6 @@ DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
         return;
 
     CVector pos = pEntity->GetPosition();
-    pos.z += 1.0f;
     float radius = g_cfg.baseRadius * g_cfg.sizeScale;
 
     float fx = g_cfg.dirFrontX * radius;
@@ -159,6 +159,42 @@ DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
 }
 
 // ---------------------------------------------------------------------
+// PIVOT: StoreShadowForTree is confirmed (CHECKPOINT_3 never appeared) to
+// NOT be called by the engine in this build -- genuinely dead code, not
+// just an unused-but-invoked NOP. Leaving the hook above installed
+// (harmless, costs nothing since it never fires) and adding a second,
+// different hook point: CEntity::Render() itself, which every entity
+// type calls when drawn unless it overrides Render() with its own
+// version. CObject (what trees are) doesn't appear to override it -- so
+// this should fire for every visible tree (and every other
+// non-overriding entity type), which we then filter down ourselves.
+//
+// Render() is virtual, so it isn't exposed via the DECL_* header macros
+// we have -- resolving its address manually via dlsym, using the same
+// Itanium mangling pattern every other CEntity method in Entity.h follows
+// (_ZN7CEntity + length+name + Ev for a no-arg method): "Render" is 6
+// chars, so _ZN7CEntity6RenderEv. This is a reconstructed guess, not
+// pulled from a header -- validate via CHECKPOINT_4 before building real
+// shadow logic on top of it, same lesson as last time.
+// ---------------------------------------------------------------------
+DECL_HOOKv(HookedEntityRender, CEntity *pThis)
+{
+    HookedEntityRender(pThis); // MUST call original -- this is what actually draws the model
+
+    static int renderCallCount = 0;
+    if (renderCallCount < 5) {
+        renderCallCount++;
+        WriteMarker("CHECKPOINT_4_render_hook_fired.txt");
+        LOGI("CEntity::Render HOOK FIRED (call #%d), entity=%p, model=%d, type=%d",
+             renderCallCount, (void*)pThis, pThis ? pThis->m_nModelIndex : -1,
+             pThis ? pThis->m_nType : -1);
+    }
+
+    // Real shadow logic intentionally NOT added yet -- confirm the hook
+    // fires at all first (check for CHECKPOINT_4).
+}
+
+// ---------------------------------------------------------------------
 // Mod lifecycle
 // ---------------------------------------------------------------------
 ON_MOD_LOAD()
@@ -173,15 +209,33 @@ ON_MOD_LOAD()
     uintptr_t targetAddr = (uintptr_t)CShadows::StoreShadowForTree;
     LOGI("CShadows::StoreShadowForTree resolved address: 0x%lx", (unsigned long)targetAddr);
 
-    if (targetAddr == 0) {
-        LOGI("ERROR: StoreShadowForTree symbol did not resolve (address is 0) -- "
-             "hook will not be installed. This means the symbol name/mangling "
-             "doesn't match this game build.");
+    if (targetAddr != 0) {
+        HOOK(HookedStoreShadowForTree, targetAddr);
+        LOGI("Hook installed on StoreShadowForTree");
+        WriteMarker("CHECKPOINT_2_hook_installed.txt");
+    } else {
+        LOGI("ERROR: StoreShadowForTree symbol did not resolve (address is 0)");
         WriteMarker("CHECKPOINT_ERROR_symbol_not_resolved.txt");
+    }
+
+    // Second, independent hook attempt: CEntity::Render, resolved manually.
+    void *gameLib = dlopen("libGTASA.so", RTLD_NOLOAD);
+    if (!gameLib) {
+        LOGI("ERROR: dlopen(libGTASA.so, RTLD_NOLOAD) failed -- game library not found under this name");
+        WriteMarker("CHECKPOINT_ERROR_gamelib_not_found.txt");
         return;
     }
 
-    HOOK(HookedStoreShadowForTree, targetAddr);
-    LOGI("Hook installed on StoreShadowForTree");
-    WriteMarker("CHECKPOINT_2_hook_installed.txt");
+    uintptr_t renderAddr = (uintptr_t)dlsym(gameLib, "_ZN7CEntity6RenderEv");
+    LOGI("CEntity::Render resolved address: 0x%lx", (unsigned long)renderAddr);
+
+    if (renderAddr == 0) {
+        LOGI("ERROR: CEntity::Render symbol did not resolve -- mangled name guess was wrong");
+        WriteMarker("CHECKPOINT_ERROR_render_symbol_not_resolved.txt");
+        return;
+    }
+
+    HOOK(HookedEntityRender, renderAddr);
+    LOGI("Hook installed on CEntity::Render");
+    WriteMarker("CHECKPOINT_4_render_hook_installed.txt");
 }
