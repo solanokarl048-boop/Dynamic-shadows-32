@@ -48,7 +48,22 @@
 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "ShadowExtender", __VA_ARGS__)
 
-MYMOD("net.xenon.shadowextender", "ShadowExtender", "1.0.0", "Xenon")
+// Non-destructive, no-log-access-needed diagnostic: write a marker file at
+// each checkpoint. Check for these with any file manager app afterward --
+// whichever ones exist tells us exactly how far execution got.
+static const char *kMarkerDir = "/sdcard/Android_unprotected/data/com.rockstargames.gtasa/configs/";
+
+static void WriteMarker(const char *name) {
+    char path[256];
+    snprintf(path, sizeof(path), "%s%s", kMarkerDir, name);
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fputs("checkpoint reached\n", f);
+        fclose(f);
+    }
+}
+
+MYMOD("net.psdk.samod.shadowextender", "ShadowExtender", "1.0.0", "YourName")
 
 // ---------------------------------------------------------------------
 // Configuration (populated from ShadowExtender.ini on load)
@@ -114,6 +129,9 @@ DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
         LOGI("StoreShadowForTree HOOK FIRED (call #%d), entity=%p, model=%d",
              callCount, (void*)pEntity, pEntity ? pEntity->m_nModelIndex : -1);
     }
+    if (callCount == 1) {
+        WriteMarker("CHECKPOINT_3_hook_fired.txt");
+    }
 
     if (!g_cfg.enabled || !g_cfg.shadowTrees || !pEntity)
         return;
@@ -122,6 +140,7 @@ DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
         return;
 
     CVector pos = pEntity->GetPosition();
+    pos.z += 1.0f;
     float radius = g_cfg.baseRadius * g_cfg.sizeScale;
 
     float fx = g_cfg.dirFrontX * radius;
@@ -130,7 +149,7 @@ DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
     float sy = g_cfg.dirSideY  * radius;
 
     CShadows::StoreShadowToBeRendered(
-        SHADOW_ADDITIVE,
+        SHADOW_DECAL,
         &pos,
         fx, fy,
         sx, sy,
@@ -145,6 +164,7 @@ DECL_HOOKv(HookedStoreShadowForTree, CEntity *pEntity)
 ON_MOD_LOAD()
 {
     LOGI("ShadowExtender OnModLoad() reached");
+    WriteMarker("CHECKPOINT_1_modload_reached.txt");
 
     LoadConfig();
     LOGI("Config loaded: enabled=%d shadowTrees=%d opacity=%.1f",
@@ -157,9 +177,11 @@ ON_MOD_LOAD()
         LOGI("ERROR: StoreShadowForTree symbol did not resolve (address is 0) -- "
              "hook will not be installed. This means the symbol name/mangling "
              "doesn't match this game build.");
+        WriteMarker("CHECKPOINT_ERROR_symbol_not_resolved.txt");
         return;
     }
 
     HOOK(HookedStoreShadowForTree, targetAddr);
     LOGI("Hook installed on StoreShadowForTree");
+    WriteMarker("CHECKPOINT_2_hook_installed.txt");
 }
