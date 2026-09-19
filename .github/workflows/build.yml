@@ -16,6 +16,9 @@ jobs:
           submodules: recursive  # <-- ADD THIS
           fetch-depth: 0
 
+      - name: Show gitmodules
+        run: cat .gitmodules
+
       - name: Verify aml-psdk
         run: |
           ls -la
