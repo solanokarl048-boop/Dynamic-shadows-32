@@ -147,6 +147,34 @@ DECL_HOOKv(HookedRenderStoredShadows, bool renderAdditive)
     }
 
     HookedRenderStoredShadows(renderAdditive); // call original -- must still render normally
+
+
+// Declare the original function pointer (outside any functions)
+void (*CShadows_StoreRealTimeShadow_o)(void* entity, float posX, float posY, float posZ, float sx, float sy, float opacity);
+
+// Define the Hook at global scope (NOT inside OnModLoad or else blocks)
+DECL_HOOKv(CShadows_StoreRealTimeShadow, void* entity, float posX, float posY, float posZ, float sx, float sy, float opacity) {
+    if (entity != nullptr) {
+        // Example: Force shadow opacity or flags on dynamic entities/objects
+        opacity = 1.0f; 
+    }
+    
+    // Call original function using the hooked pointer
+    CShadows_StoreRealTimeShadow_o(entity, posX, posY, posZ, sx, sy, opacity);
+}
+
+// 3. Register the Hook inside OnModLoad
+ON_MOD_LOAD() {
+    uintptr_t pGTASA = aml->GetLibHandle("libGTASA.so");
+    
+    if (pGTASA) {
+        // Hook the function using its symbol or offset in libGTASA.so
+        // Example symbol: _ZN8CShadows22StoreRealTimeShadowEPvffff
+        HOOK(_ZN8CShadows22StoreRealTimeShadowEPvffff, CShadows_StoreRealTimeShadow, CShadows_StoreRealTimeShadow_o);
+    }
+}
+
+    
 }
 
 // ---------------------------------------------------------------------
