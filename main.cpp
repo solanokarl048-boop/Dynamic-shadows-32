@@ -60,7 +60,7 @@
 // Non-destructive on-device diagnostic: write a marker file at each
 // checkpoint, checkable with any file manager app. Left in place (cheap,
 // capped) in case future changes need the same kind of verification.
-static const char *kMarkerDir = "/sdcard/Android_unprotected/data/com.rockstargames.gtasa/files/configs/";
+static const char *kMarkerDir = "/sdcard/Android/data/com.rockstargames.gtasa/files/";
 
 static void WriteMarker(const char *name) {
     char path[256];
@@ -80,7 +80,7 @@ MYMOD("net.psdk.samod.shadowextender", "ShadowExtender", "1.0.0", "YourName")
 struct Config {
     bool  enabled     = true;
     bool  shadowObjects = true; // was "shadowTrees" -- see SCOPE note above
-    bool  useRealTimeShadow = true; // StoreRealTimeShadow confirmed rejecting static objects (trees) -- see CHECKPOINT_5_returned_false
+    bool  useRealTimeShadow = false; // StoreRealTimeShadow confirmed rejecting static objects (trees) -- see CHECKPOINT_5_returned_false
     float opacity       = 180.0f; // maps to CShadows Brightness (i16), blob fallback only
     float sizeScale      = 1.0f;  // multiplies the base shadow radius
     float baseRadius     = 3.0f;  // world units, before sizeScale
@@ -147,34 +147,37 @@ DECL_HOOKv(HookedRenderStoredShadows, bool renderAdditive)
     }
 
     HookedRenderStoredShadows(renderAdditive); // call original -- must still render normally
-
-
-// Declare the original function pointer (outside any functions)
-void (*CShadows_StoreRealTimeShadow_o)(void* entity, float posX, float posY, float posZ, float sx, float sy, float opacity);
-
-// Define the Hook at global scope (NOT inside OnModLoad or else blocks)
-DECL_HOOKv(CShadows_StoreRealTimeShadow, void* entity, float posX, float posY, float posZ, float sx, float sy, float opacity) {
-    if (entity != nullptr) {
-        // Example: Force shadow opacity or flags on dynamic entities/objects
-        opacity = 1.0f; 
-    }
-    
-    // Call original function using the hooked pointer
-    CShadows_StoreRealTimeShadow_o(entity, posX, posY, posZ, sx, sy, opacity);
 }
 
-// 3. Register the Hook inside OnModLoad
-ON_MOD_LOAD() {
-    uintptr_t pGTASA = aml->GetLibHandle("libGTASA.so");
-    
-    if (pGTASA) {
-        // Hook the function using its symbol or offset in libGTASA.so
-        // Example symbol: _ZN8CShadows22StoreRealTimeShadowEPvffff
-        HOOK(_ZN8CShadows22StoreRealTimeShadowEPvffff, CShadows_StoreRealTimeShadow, CShadows_StoreRealTimeShadow_o);
-    }
-}
+// ---------------------------------------------------------------------
+// Diagnostic hook: intercept EVERY call to StoreRealTimeShadow, including
+// the engine's own internal calls for peds/vehicles -- not just the ones
+// we make ourselves. This tells us what kind of entities the engine
+// actually accepts, and specifically whether bIsStatic (confirmed real
+// field in Entity.h) is what's causing our own calls to be rejected.
+// ---------------------------------------------------------------------
+DECL_HOOKb(HookedStoreRealTimeShadow, CPhysical *pPhysical, float ShadowDisplacementX,
+           float ShadowDisplacementY, float ShadowFrontX, float ShadowFrontY,
+           float ShadowSideX, float ShadowSideY)
+{
+    bool result = HookedStoreRealTimeShadow(pPhysical, ShadowDisplacementX, ShadowDisplacementY,
+                                             ShadowFrontX, ShadowFrontY, ShadowSideX, ShadowSideY);
 
-    
+    static int logCount = 0;
+    if (logCount < 20 && pPhysical) {
+        logCount++;
+        CEntity *pEnt = reinterpret_cast<CEntity*>(pPhysical); // CPhysical IS-A CEntity
+        LOGI("StoreRealTimeShadow CALLED: type=%d model=%d static=%d -> result=%d",
+             pEnt->m_nType, pEnt->m_nModelIndex, pEnt->bIsStatic, result);
+
+        char marker[128];
+        snprintf(marker, sizeof(marker),
+                 "CHECKPOINT_7_realtimeshadow_ENGINE_type%d_static%d_result%d.txt",
+                 pEnt->m_nType, pEnt->bIsStatic, result ? 1 : 0);
+        WriteMarker(marker);
+    }
+
+    return result;
 }
 
 // ---------------------------------------------------------------------
@@ -287,5 +290,19 @@ ON_MOD_LOAD()
         HOOK(HookedRenderStoredShadows, renderStoredAddr);
         LOGI("Hook installed on RenderStoredShadows");
         WriteMarker("CHECKPOINT_6_renderstoredshadows_hook_installed.txt");
+    }
+
+    // Third diagnostic hook: intercept every call to StoreRealTimeShadow,
+    // including the engine's own for peds/vehicles.
+    uintptr_t realTimeShadowAddr = (uintptr_t)CShadows::StoreRealTimeShadow;
+    LOGI("CShadows::StoreRealTimeShadow resolved address: 0x%lx", (unsigned long)realTimeShadowAddr);
+
+    if (realTimeShadowAddr == 0) {
+        LOGI("ERROR: StoreRealTimeShadow symbol did not resolve");
+        WriteMarker("CHECKPOINT_ERROR_storerealtimeshadow_not_resolved.txt");
+    } else {
+        HOOK(HookedStoreRealTimeShadow, realTimeShadowAddr);
+        LOGI("Hook installed on StoreRealTimeShadow (intercept mode)");
+        WriteMarker("CHECKPOINT_7_storerealtimeshadow_hook_installed.txt");
     }
 }
