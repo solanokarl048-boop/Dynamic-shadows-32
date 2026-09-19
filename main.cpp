@@ -60,7 +60,7 @@
 // Non-destructive on-device diagnostic: write a marker file at each
 // checkpoint, checkable with any file manager app. Left in place (cheap,
 // capped) in case future changes need the same kind of verification.
-static const char *kMarkerDir = "/sdcard/Android_unprotected/data/com.rockstargames.gtasa/configs/";
+static const char *kMarkerDir = "/sdcard/Android/data/com.rockstargames.gtasa/files/";
 
 static void WriteMarker(const char *name) {
     char path[256];
@@ -80,7 +80,7 @@ MYMOD("net.psdk.samod.shadowextender", "ShadowExtender", "1.0.0", "YourName")
 struct Config {
     bool  enabled     = true;
     bool  shadowObjects = true; // was "shadowTrees" -- see SCOPE note above
-    bool  useRealTimeShadow = true; // real dynamic shadow vs. old blob fallback
+    bool  useRealTimeShadow = false; // StoreRealTimeShadow confirmed rejecting static objects (trees) -- see CHECKPOINT_5_returned_false
     float opacity       = 180.0f; // maps to CShadows Brightness (i16), blob fallback only
     float sizeScale      = 1.0f;  // multiplies the base shadow radius
     float baseRadius     = 3.0f;  // world units, before sizeScale
@@ -93,7 +93,7 @@ struct Config {
 
 static Config g_cfg;
 
-static const char *kIniPath = "/sdcard/Android/data/com.rockstargames.gtasa/files/ShadowExtender.ini";
+static const char *kIniPath = "/sdcard/Androidg_unprotected/data/com.rockstargames.gtasa/configs";
 
 static void LoadConfig() {
     IniConfig ini;
@@ -168,10 +168,18 @@ DECL_HOOKv(HookedEntityRender, CEntity *pThis)
                            : "CHECKPOINT_5_realtimeshadow_returned_false.txt");
         }
     } else {
-        // Fallback: flat untextured polygon blob (the original approach).
+        // Fallback: flat untextured polygon blob. SHADOW_DEFAULT rather
+        // than SHADOW_ADDITIVE -- RenderStoredShadows(bool renderAdditive)
+        // renders additive- and non-additive-type stored shadows in two
+        // separate passes; if the engine's main loop only calls the
+        // non-additive pass by default (plausible, given CJ's own shadow
+        // always renders reliably), anything stored as SHADOW_ADDITIVE
+        // would never actually get drawn regardless of everything else
+        // being correct. SHADOW_DEFAULT should go through the same pass
+        // that's already confirmed active.
         CVector pos = pThis->GetPosition();
         CShadows::StoreShadowToBeRendered(
-            SHADOW_ADDITIVE,
+            SHADOW_DEFAULT,
             &pos,
             fx, fy,
             sx, sy,
