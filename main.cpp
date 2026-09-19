@@ -33,6 +33,16 @@
 // CShadows::CalcPedShadowValues(CVector UnitVecToLight, ...), is known,
 // but no CTimeCycle/CWeather-equivalent header has been found yet to
 // supply the light vector.
+//
+// SHADOW MECHANISM: GTA:SA Android doesn't use texture-blob shadows for
+// peds/vehicles -- those are dynamic/real-time. Shadows.h already had the
+// real primitive for this the whole time: CShadows::StoreRealTimeShadow
+// (CPhysical *pPhysical, float ShadowDisplacementX, float
+// ShadowDisplacementY, float ShadowFrontX, float ShadowFrontY, float
+// ShadowSideX, float ShadowSideY) -> bool. CObject (what trees/props are)
+// inherits CPhysical, so entities from the Render() hook can be passed in
+// directly. This replaces an earlier, wrong detour into texture-blob
+// lookups via CTxdStore -- removed below.
 
 #include <aml-psdk/game_sa/plugin.h>
 #include <aml-psdk/game_sa/entity/Object.h>
@@ -70,7 +80,8 @@ MYMOD("net.psdk.samod.shadowextender", "ShadowExtender", "1.0.0", "YourName")
 struct Config {
     bool  enabled     = true;
     bool  shadowObjects = true; // was "shadowTrees" -- see SCOPE note above
-    float opacity       = 180.0f; // maps to CShadows Brightness (i16)
+    bool  useRealTimeShadow = true; // real dynamic shadow vs. old blob fallback
+    float opacity       = 180.0f; // maps to CShadows Brightness (i16), blob fallback only
     float sizeScale      = 1.0f;  // multiplies the base shadow radius
     float baseRadius     = 3.0f;  // world units, before sizeScale
     float dirFrontX       = 0.7f; // fixed shadow-spread direction,
@@ -91,6 +102,7 @@ static void LoadConfig() {
 
     g_cfg.enabled       = ini.GetBool("General", "Enabled", g_cfg.enabled);
     g_cfg.shadowObjects  = ini.GetBool("Targets", "ShadowObjects", g_cfg.shadowObjects);
+    g_cfg.useRealTimeShadow = ini.GetBool("Render", "UseRealTimeShadow", g_cfg.useRealTimeShadow);
 
     g_cfg.opacity        = ini.GetFloat("Render", "Opacity", g_cfg.opacity);
     g_cfg.sizeScale       = ini.GetFloat("Render", "SizeScale", g_cfg.sizeScale);
@@ -135,22 +147,38 @@ DECL_HOOKv(HookedEntityRender, CEntity *pThis)
     if (ModelBlacklisted(pThis->m_nModelIndex))
         return;
 
-    CVector pos = pThis->GetPosition();
     float radius = g_cfg.baseRadius * g_cfg.sizeScale;
-
     float fx = g_cfg.dirFrontX * radius;
     float fy = g_cfg.dirFrontY * radius;
     float sx = g_cfg.dirSideX  * radius;
     float sy = g_cfg.dirSideY  * radius;
 
-    CShadows::StoreShadowToBeRendered(
-        SHADOW_ADDITIVE,
-        &pos,
-        fx, fy,
-        sx, sy,
-        (i16)g_cfg.opacity,
-        0, 0, 0 // dark blob; tweak RGB here for a tinted foliage shadow
-    );
+    if (g_cfg.useRealTimeShadow) {
+        // Real dynamic shadow system -- same mechanism the game itself
+        // uses for peds/vehicles, not a texture blob. CObject IS-A
+        // CPhysical, so this cast is safe given IsObject() already
+        // returned true above.
+        CPhysical *pPhysical = static_cast<CPhysical*>(pThis);
+        bool ok = CShadows::StoreRealTimeShadow(pPhysical, 0.0f, 0.0f, fx, fy, sx, sy);
+
+        static int rtCallCount = 0;
+        if (rtCallCount < 5) {
+            rtCallCount++;
+            WriteMarker(ok ? "CHECKPOINT_5_realtimeshadow_returned_true.txt"
+                           : "CHECKPOINT_5_realtimeshadow_returned_false.txt");
+        }
+    } else {
+        // Fallback: flat untextured polygon blob (the original approach).
+        CVector pos = pThis->GetPosition();
+        CShadows::StoreShadowToBeRendered(
+            SHADOW_ADDITIVE,
+            &pos,
+            fx, fy,
+            sx, sy,
+            (i16)g_cfg.opacity,
+            0, 0, 0
+        );
+    }
 }
 
 // ---------------------------------------------------------------------
